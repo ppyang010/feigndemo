@@ -3,9 +3,9 @@ spring:
     name: simple_feign
 server:
   port: 7300
-feign:
-  hystrix:
-    enabled: true
+#feign:
+#  hystrix:
+#    enabled: true
 management:
   endpoints:
     web:

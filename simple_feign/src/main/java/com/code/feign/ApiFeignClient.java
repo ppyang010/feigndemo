@@ -8,7 +8,7 @@ import java.util.Map;
 
 @FeignClient(name = "api", url = "http://127.0.0.1:7333", path = "/api"
 //        , fallback = ApiFeignClientFallback.class
-        , fallbackFactory = ApiFeignClientFallbackFactory.class
+//        , fallbackFactory = ApiFeignClientFallbackFactory.class
 )
 public interface ApiFeignClient {
 
