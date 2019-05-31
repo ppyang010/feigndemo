@@ -1,5 +1,7 @@
 package com.code.controller;
 
+import cn.hutool.json.JSONUtil;
+import com.code.domain.User;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
@@ -29,5 +31,11 @@ public class ApiController {
         System.out.println("timeout method invoke");
         TimeUnit.SECONDS.sleep(10);
         return "timeout method invoke";
+    }
+
+    @PostMapping("/post")
+    public User postMethod(@RequestBody User user){
+        System.out.println(JSONUtil.toJsonStr(user));
+        return user;
     }
 }

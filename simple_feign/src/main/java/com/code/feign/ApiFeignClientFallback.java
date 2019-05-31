@@ -1,5 +1,6 @@
 package com.code.feign;
 
+import com.code.domain.User;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -15,5 +16,10 @@ public class ApiFeignClientFallback implements ApiFeignClient {
     public String timeout() {
         return "[timeout] fallback method invoke";
 
+    }
+
+    @Override
+    public User postMethod(User user) {
+        return null;
     }
 }

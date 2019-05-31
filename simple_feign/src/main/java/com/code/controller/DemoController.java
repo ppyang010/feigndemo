@@ -1,10 +1,10 @@
 package com.code.controller;
 
+import cn.hutool.json.JSONUtil;
+import com.code.domain.User;
 import com.code.feign.ApiFeignClient;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/demo")
@@ -20,5 +20,13 @@ public class DemoController {
     @GetMapping("/timeout")
     public String timeout() {
         return apiFeignClient.timeout();
+    }
+
+    @GetMapping("/post")
+    public User postMethod(){
+        User user = new User();
+        user.setUsername("ccy");
+        user.setPhone("186186186");
+        return apiFeignClient.postMethod(user);
     }
 }
