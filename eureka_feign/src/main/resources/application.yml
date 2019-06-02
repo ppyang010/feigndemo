@@ -1,0 +1,27 @@
+spring:
+  profiles:
+    active: dev0
+---
+spring:
+  profiles: dev0
+  application:
+    name: eureka-feign
+server:
+  port: 7200
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://127.0.0.1:7700/eureka
+
+---
+spring:
+  profiles: dev1
+  application:
+    name: eureka-feign
+server:
+  port: 7222
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://127.0.0.1:7700/eureka
+
