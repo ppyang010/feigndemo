@@ -11,7 +11,7 @@ import org.springframework.context.ConfigurableApplicationContext;
  * @author ccy
  */
 @SpringBootApplication
-@EnableFeignClients(defaultConfiguration={MyFeignClientsConfiguration.class})
+@EnableFeignClients()
 public class SpringDemoApplication {
 
     public static void main(String[] args) {

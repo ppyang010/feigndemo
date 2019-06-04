@@ -1,5 +1,6 @@
 package com.code.feign;
 
+import com.code.config.MyFeignClientsConfiguration;
 import com.code.domain.User;
 import org.springframework.cloud.openfeign.FeignClient;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -9,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 
 import java.util.Map;
 
-@FeignClient(name = "api", url = "http://127.0.0.1:7333", path = "/api"
+@FeignClient(name = "api", url = "http://127.0.0.1:7333", path = "/api", configuration = MyFeignClientsConfiguration.class
 //        , fallback = ApiFeignClientFallback.class
 //        , fallbackFactory = ApiFeignClientFallbackFactory.class
 )
