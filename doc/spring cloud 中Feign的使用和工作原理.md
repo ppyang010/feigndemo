@@ -844,43 +844,6 @@ public class ReflectiveFeign extends Feign {
 ```
 
 
-##### SpringMvcContract 解析spring mvc注解
-
-SpringMvcContract继承了feign的类Contract.BaseContract，作用是解析接口方法上的注解和方法参数，生成MethodMetadata用于接口方法调用过程中组装http请求。
-
-```java
-public class SpringMvcContract extends Contract.BaseContract
-        implements ResourceLoaderAware {
-。。。
-
-    //处理Class上的注解
-    @Override
-    protected void processAnnotationOnClass(MethodMetadata data, Class<?> clz) {
-    。。。
-    }
-    //处理方法
-    @Override
-    public MethodMetadata parseAndValidateMetadata(Class<?> targetType, Method method) {
-        。。。
-    }
-    //处理方法上的注解
-    @Override
-    protected void processAnnotationOnMethod(MethodMetadata data,
-            Annotation methodAnnotation, Method method) {
-        。。。
-    }
-    //处理参数上的注解
-      @Override
-      protected boolean processAnnotationsOnParameter(MethodMetadata data,
-              Annotation[] annotations, int paramIndex) {
-          。。。
-      }
-}
-```
-
-几个覆盖方法分别是处理类上的注解，处理方法，处理方法上的注解，处理方法参数注解，最终生成完整的MethodMetadata。
-
-
 
 
 
