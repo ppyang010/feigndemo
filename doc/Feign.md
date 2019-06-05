@@ -17,33 +17,70 @@ Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操�
 
 
 
-# 1.使用
+# 1.使用介绍
 
 这部分主要包含
 
-1.绝对链接demo ,使用注册中心demo
+1.简单介绍feign的使用
 
 2.可配置信息的介绍
 
-## demo1
+## demo
 
 依赖
 
 ```xml
-  <dependency>
+<dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <artifactId>spring-cloud-starter</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.cloud</groupId>
+            <!-- 注意名称的改变 和F之前的版本所有区别 -->
+            <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+
 
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-feign</artifactId>
         </dependency>
+
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
         </dependency>
+
 ```
+
+配置文件
+
+```java
+spring:
+  profiles: dev0
+  application:
+    name: eureka-feign
+server:
+  port: 7200
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://127.0.0.1:7700/eureka
+```
+
+
+
+
 
 EnableFeignClients
 
@@ -59,6 +96,8 @@ public class SpringDemoApplication {
 ```
 
 客户端
+
+绝对地址
 
 ```java
 @FeignClient(name = "api", url = "http://127.0.0.1:7333", path = "/api"
@@ -76,9 +115,7 @@ public interface ApiFeignClient {
 }
 ```
 
-
-
-## demo2
+注册中心
 
 ```java
 @FeignClient(name = "eureka-feign", path = "/api")
@@ -98,6 +135,13 @@ public interface ApiFeignClient {
 ```
 
 
+
+使用
+
+```java
+    @Autowired
+    private ApiFeignClient apiFeignClient;
+```
 
 
 
@@ -123,7 +167,7 @@ public interface ApiFeignClient {
  Class<?>[] defaultConfiguration() default {};
 
  /**
-      *clients属性是精准指定Class扫描，如果这个属性不为空,关闭扫描
+  *clients属性是精准指定Class扫描，如果这个属性不为空,关闭扫描
   */
  Class<?>[] clients() default {};
 ```
@@ -1060,6 +1104,7 @@ public class LoadBalancerFeignClient implements Client {
 RequesTemplate在生成Request
 Request交给Client去处理，其中Client可以是HttpUrlConnection、HttpClient也可以是Okhttp
 最后Client被封装到LoadBalanceClient类，这个类结合类Ribbon做到了负载均衡。
+
 
 
 
