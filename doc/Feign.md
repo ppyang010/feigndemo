@@ -63,7 +63,7 @@ Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操�
 
 ```
 
-配置文件
+配置文件 application.yml
 
 ```java
 spring:
@@ -138,6 +138,8 @@ public interface ApiFeignClient {
 
 使用
 
+可以直接在其他springbean中注入使用
+
 ```java
     @Autowired
     private ApiFeignClient apiFeignClient;
@@ -146,6 +148,8 @@ public interface ApiFeignClient {
 
 
 ## @EnableFeignClients 注解属性
+
+在启动类上开启的@EnableFeignClients 注解
 
 ```java
 
@@ -181,7 +185,7 @@ public interface ApiFeignClient {
 ```java
 
  /**
- *value和name用于定义http客户端服务的名称，在spring cloud为服务之间调用服务总要有负载均衡的，比如Rinbon。
+ *value和name用于定义http客户端服务的名称 ,如果要在spring cloud为配合Rinbon做服务间调用负载均衡的话。这里的name=注册在enurke上的application.name
  **/
  @AliasFor("name")
  String value() default "";
@@ -212,7 +216,8 @@ public interface ApiFeignClient {
  Class<?>[] configuration() default {};
 
  /**
-  * 使用fallback机制时可以配置的类属性，继承客户端接口，实现fallback逻辑。如果要使用fallback机制需要配合Hystrix一起，所以需要开启Hystrix。(默认关闭) feign.hystrix.enabled=true 同时配置 fallback 和fallbackFactory 属性 使用fallback
+  * 使用fallback机制时可以配置的类属性，继承客户端接口，实现fallback逻辑。如果要使用fallback机制需要配合Hystrix一起，所以需要开启Hystrix。(默认关闭) feign.hystrix.enabled=true 
+  同时配置 fallback 和fallbackFactory 属性 使用fallback
   */
  Class<?> fallback() default void.class;
 
@@ -240,13 +245,6 @@ fallback 和 fallbackFactory 两者主要差别在于 fallbackFactory 可以获�
 
 
 
-Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操作，可以很方便的使调用HTTP接口像方法调用一样简单。
-Rbbion是一款客户端负载均衡组件，提供了容易扩展的负载均衡策略。
-
-
-
-
-
 ### 初始化流程
 
 本块内容包含
@@ -256,7 +254,7 @@ spring cloud feign 初始化流程涉及的配置介绍
 
 #### 1.FeignAutoConfiguration
 
-在这个类中配置Feign上下文（FeignContext）、配置Targeter、配置Client(仅仅组件)
+在这个类中主要配置Feign上下文（FeignContext）、配置Targeter、配置Client(仅仅组件)
 
 ```java
 @Configuration
@@ -291,7 +289,7 @@ public class FeignAutoConfiguration {
             return new HystrixTargeter();
         }
     }
-      //Targeter 具体生成接口动态代理
+      //Targeter 实例化的入口类
     //默认的Targeter实现  需要排除hystrix 相关依赖
     @Configuration
     @ConditionalOnMissingClass("feign.hystrix.HystrixFeign")
@@ -330,9 +328,127 @@ public class FeignAutoConfiguration {
 
 
 
+
+
+##### FeignContext 隔离配置
+
+在@FeignClient注解参数configuration，指定的类是Spring的Configuration Bean，里面方法上加@Bean注解实现Bean的注入，可以指定feign客户端的各种配置，包括Encoder/Decoder/Contract/Feign.Builder等。不同的客户端指定不同配置类，就需要对配置类进行隔离，FeignContext就是用于隔离配置的。
+
+```java
+public class FeignContext extends NamedContextFactory<FeignClientSpecification> {
+
+    public FeignContext() {
+        super(FeignClientsConfiguration.class, "feign", "feign.client.name");
+    }
+}
+```
+
+FeignContext继承NamedContextFactory，空参数构造函数指定FeignClientsConfiguration类为默认配置。
+NamedContextFactory实现接口ApplicationContextAware，注入ApplicationContext作为parent：
+
+```java
+public abstract class NamedContextFactory<C extends NamedContextFactory.Specification>
+        implements DisposableBean, ApplicationContextAware {
+    //每个@FeignClent的name 对应一个Context
+    private Map<String, AnnotationConfigApplicationContext> contexts = new ConcurrentHashMap<>();
+    //所有configuration的集合 key为@FeignClent的name
+    private Map<String, C> configurations = new ConcurrentHashMap<>();
+    //父ApplicationContext，通过ApplicationContextAware接口注入
+    private ApplicationContext parent;
+    //默认配置类
+    private Class<?> defaultConfigType;
+    private final String propertySourceName;
+    private final String propertyName;
+。。。
+    //设置配置，在FeignAutoConfiguration中将Spring Context中的所有FeignClientSpecification设置进来，如果@EnableFeignClients有设置参数defaultConfiguration也会加进来，前面已经分析在registerDefaultConfiguration方法中注册的FeignClientSpecification Bean
+    public void setConfigurations(List<C> configurations) {
+        for (C client : configurations) {
+            this.configurations.put(client.getName(), client);
+        }
+    }
+
+    //获取指定@FeignClent的name的ApplicationContext，先从缓存中获取，没有就创建
+    protected AnnotationConfigApplicationContext getContext(String name) {
+        if (!this.contexts.containsKey(name)) {
+            synchronized (this.contexts) {
+                if (!this.contexts.containsKey(name)) {
+                    this.contexts.put(name, createContext(name));
+                }
+            }
+        }
+        return this.contexts.get(name);
+    }
+
+    //创建ApplicationContext
+    protected AnnotationConfigApplicationContext createContext(String name) {
+        //新建AnnotationConfigApplicationContext
+        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
+        //根据name在configurations找到所有的配置类，注册到context总
+        if (this.configurations.containsKey(name)) {
+            for (Class<?> configuration : this.configurations.get(name)
+                    .getConfiguration()) {
+                context.register(configuration);
+            }
+        }
+        //将default.开头的默认默认也注册到Context中
+        for (Map.Entry<String, C> entry : this.configurations.entrySet()) {
+            if (entry.getKey().startsWith("default.")) {
+                for (Class<?> configuration : entry.getValue().getConfiguration()) {
+                    context.register(configuration);
+                }
+            }
+        }
+        //注册一些需要的bean
+        context.register(PropertyPlaceholderAutoConfiguration.class,
+                this.defaultConfigType);
+        context.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
+                this.propertySourceName,
+                Collections.<String, Object> singletonMap(this.propertyName, name)));
+        if (this.parent != null) {
+        // 设置parent
+            context.setParent(this.parent);
+        }
+        //刷新，完成配置类中的bean生成
+        context.refresh();
+        return context;
+    }
+
+    //从命名空间中获取指定类型的Bean
+    public <T> T getInstance(String name, Class<T> type) {
+        AnnotationConfigApplicationContext context = getContext(name);
+        if (BeanFactoryUtils.beanNamesForTypeIncludingAncestors(context,
+                type).length > 0) {
+            return context.getBean(type);
+        }
+        return null;
+    }
+
+    //从命名空间中获取指定类型的Bean
+    public <T> Map<String, T> getInstances(String name, Class<T> type) {
+        AnnotationConfigApplicationContext context = getContext(name);
+        if (BeanFactoryUtils.beanNamesForTypeIncludingAncestors(context,
+                type).length > 0) {
+            return BeanFactoryUtils.beansOfTypeIncludingAncestors(context, type);
+        }
+        return null;
+    }
+
+}
+```
+
+
+
+关键的方法是createContext，为@FeignClient的name独立创建ApplicationContext，设置parent为外部传入的Context，这样就可以共用外部的Context中的Bean，又有各种独立的配置Bean
+
+从FeignContext中获取Bean，需要传入@FeignClient的name，根据name找到缓存中的ApplicationContext，先从自己注册的Bean中获取bean，没有获取到再从到parent中获取。
+
+
+
+
+
 #### 2.FeignClientsConfiguration
 
-加载Decoder、Encoder、Retryer、Contract（SpringMvcContract）、FeignBuilder
+加载Decoder、Encoder、Retryer、Contract（SpringMvcContract）、FeignBuilder等组件
 
 其中Decoder 和 Encoder 默认使用的是spring的方式 默认通过HttpMessageConverters进行处理
 
@@ -356,7 +472,7 @@ public class FeignClientsConfiguration {
     public Encoder feignEncoder() {
         return new SpringEncoder(this.messageConverters);
     }
-    //注入了SpringMvcContract这个类作为Spring MVC的注解到Feign注解的转换。
+    //注入了SpringMvcContract这个类作为对Spring MVC的注解解析
     @Bean
     @ConditionalOnMissingBean
     public Contract feignContract(ConversionService feignConversionService) {
@@ -389,7 +505,8 @@ public class FeignClientsConfiguration {
     public Retryer feignRetryer() {
         return Retryer.NEVER_RETRY;
     }
-
+	
+    //feign代理对象的构建类,包含构建代理对象的所有属性
     @Bean
     @Scope("prototype")
     @ConditionalOnMissingBean
@@ -520,6 +637,7 @@ public void registerFeignClients(AnnotationMetadata metadata,
 private void registerFeignClient(BeanDefinitionRegistry registry,
    AnnotationMetadata annotationMetadata, Map<String, Object> attributes) {
   String className = annotationMetadata.getClassName();
+    //创建FeignClientFactoryBean 类型的BeanDefinition
   BeanDefinitionBuilder definition = BeanDefinitionBuilder
     .genericBeanDefinition(FeignClientFactoryBean.class);
   validate(attributes);
@@ -558,7 +676,7 @@ private void registerFeignClient(BeanDefinitionRegistry registry,
 
 大概总结一下FeignClient的注册流程
 
-1. 读取`@EnableFeignClients`注解中basePackage值下的所有带有`@FeignClient`的接口
+1. 扫描`@EnableFeignClients`注解中basePackage值下的所有带有`@FeignClient`的接口
 2. 读取接口上面的 `@FeignClient` 注解参数
 3. 如果此接口上有Configuration参数，那么先进行注册此参数，注意此参数注册在Spring容器中是以`FeignClientSpecification`类型注册的
 4. 注册完Configuration参数以后，然后将其余的信息注册到容器中，注意这时是以`FeignClientFactoryBean `类型注册的，另外此时的Configuration参数并没有传过来。
@@ -568,10 +686,6 @@ private void registerFeignClient(BeanDefinitionRegistry registry,
 
 
 ### 工作原理
-
-**临时:这块内容主要介绍1.实例化的主流程;2.工厂Bean创建代理对象时，使用到Feign的其他组件，如：Encoder、Decoder、Contract等**
-
-这部分暂时不使用hystrix
 
 这部分包含
 
@@ -610,7 +724,7 @@ class FeignClientFactoryBean implements FactoryBean<Object>, InitializingBean,
     <T> T getTarget() {
         //FeignContext在FeignAutoConfiguration中自动注册，FeignContext用于客户端配置类独立注册，后面具体分析
         FeignContext context = applicationContext.getBean(FeignContext.class);
-        //创建Feign.Builder 获取每个FeignClient中Encoder Decoder Contract,FeignClientProperties配置,等组件并设置到Builder中
+        //创建Feign.Builder 从FeignContext获取每个FeignClient中Encoder Decoder Contract,FeignClientProperties配置,等组件并设置到Builder中
         Feign.Builder builder = feign(context);
         //@FeignClient注解没有配置URL属性
         if (!StringUtils.hasText(this.url)) {
@@ -696,8 +810,9 @@ public static class Builder {
 public class ReflectiveFeign extends Feign {
     -------其余代码省略
     public <T> T newInstance(Target<T> target) {
-      ////核心方法，解析定义的@FeignClient组件中的方法和请求路径
-     //使用contract 将我们定义@FeignClient的接口方法进行包装  在spring中解析应该就是spring mvc相关的注解
+      //核心方法，解析定义的@FeignClient组件中的方法和请求路径 为每个方法创建一个MethodHandler
+     //这里有用到springContract 解析springmvc的注解 获取到方法的元信息
+     //key 接口类的方法名
     Map<String, MethodHandler> nameToHandler = targetToHandlersByName.apply(target);
     Map<Method, MethodHandler> methodToHandler = new LinkedHashMap<Method, MethodHandler>();
     List<DefaultMethodHandler> defaultMethodHandlers = new LinkedList<DefaultMethodHandler>();
@@ -728,157 +843,9 @@ public class ReflectiveFeign extends Feign {
 }
 ```
 
-##### SpringMvcContract 解析spring mvc注解
-
-SpringMvcContract继承了feign的类Contract.BaseContract，作用是解析接口方法上的注解和方法参数，生成MethodMetadata用于接口方法调用过程中组装http请求。
-
-```java
-public class SpringMvcContract extends Contract.BaseContract
-        implements ResourceLoaderAware {
-。。。
-
-    //处理Class上的注解
-    @Override
-    protected void processAnnotationOnClass(MethodMetadata data, Class<?> clz) {
-    。。。
-    }
-    //处理方法
-    @Override
-    public MethodMetadata parseAndValidateMetadata(Class<?> targetType, Method method) {
-        。。。
-    }
-    //处理方法上的注解
-    @Override
-    protected void processAnnotationOnMethod(MethodMetadata data,
-            Annotation methodAnnotation, Method method) {
-        。。。
-    }
-    //处理参数上的注解
-      @Override
-      protected boolean processAnnotationsOnParameter(MethodMetadata data,
-              Annotation[] annotations, int paramIndex) {
-          。。。
-      }
-}
-```
-
-几个覆盖方法分别是处理类上的注解，处理方法，处理方法上的注解，处理方法参数注解，最终生成完整的MethodMetadata。
 
 
 
-
-
-##### FeignContext 隔离配置
-
-在@FeignClient注解参数configuration，指定的类是Spring的Configuration Bean，里面方法上加@Bean注解实现Bean的注入，可以指定feign客户端的各种配置，包括Encoder/Decoder/Contract/Feign.Builder等。不同的客户端指定不同配置类，就需要对配置类进行隔离，FeignContext就是用于隔离配置的。
-
-```java
-public class FeignContext extends NamedContextFactory<FeignClientSpecification> {
-
-    public FeignContext() {
-        super(FeignClientsConfiguration.class, "feign", "feign.client.name");
-    }
-}
-```
-
-FeignContext继承NamedContextFactory，空参数构造函数指定FeignClientsConfiguration类为默认配置。
-NamedContextFactory实现接口ApplicationContextAware，注入ApplicationContext作为parent：
-
-```java
-public abstract class NamedContextFactory<C extends NamedContextFactory.Specification>
-        implements DisposableBean, ApplicationContextAware {
-    //每个@FeignClent的name 对应一个Context
-    private Map<String, AnnotationConfigApplicationContext> contexts = new ConcurrentHashMap<>();
-    //不同命名空间的定义
-    private Map<String, C> configurations = new ConcurrentHashMap<>();
-    //父ApplicationContext，通过ApplicationContextAware接口注入
-    private ApplicationContext parent;
-    //默认配置类
-    private Class<?> defaultConfigType;
-    private final String propertySourceName;
-    private final String propertyName;
-。。。
-    //设置配置，在FeignAutoConfiguration中将Spring Context中的所有FeignClientSpecification设置进来，如果@EnableFeignClients有设置参数defaultConfiguration也会加进来，前面已经分析在registerDefaultConfiguration方法中注册的FeignClientSpecification Bean
-    public void setConfigurations(List<C> configurations) {
-        for (C client : configurations) {
-            this.configurations.put(client.getName(), client);
-        }
-    }
-
-    //获取指定@FeignClent的name的ApplicationContext，先从缓存中获取，没有就创建
-    protected AnnotationConfigApplicationContext getContext(String name) {
-        if (!this.contexts.containsKey(name)) {
-            synchronized (this.contexts) {
-                if (!this.contexts.containsKey(name)) {
-                    this.contexts.put(name, createContext(name));
-                }
-            }
-        }
-        return this.contexts.get(name);
-    }
-
-    //创建ApplicationContext
-    protected AnnotationConfigApplicationContext createContext(String name) {
-        //新建AnnotationConfigApplicationContext
-        AnnotationConfigApplicationContext context = new AnnotationConfigApplicationContext();
-        //根据name在configurations找到所有的配置类，注册到context总
-        if (this.configurations.containsKey(name)) {
-            for (Class<?> configuration : this.configurations.get(name)
-                    .getConfiguration()) {
-                context.register(configuration);
-            }
-        }
-        //将default.开头的默认默认也注册到Context中
-        for (Map.Entry<String, C> entry : this.configurations.entrySet()) {
-            if (entry.getKey().startsWith("default.")) {
-                for (Class<?> configuration : entry.getValue().getConfiguration()) {
-                    context.register(configuration);
-                }
-            }
-        }
-        //注册一些需要的bean
-        context.register(PropertyPlaceholderAutoConfiguration.class,
-                this.defaultConfigType);
-        context.getEnvironment().getPropertySources().addFirst(new MapPropertySource(
-                this.propertySourceName,
-                Collections.<String, Object> singletonMap(this.propertyName, name)));
-        if (this.parent != null) {
-        // 设置parent
-            context.setParent(this.parent);
-        }
-        //刷新，完成配置类中的bean生成
-        context.refresh();
-        return context;
-    }
-
-    //从命名空间中获取指定类型的Bean
-    public <T> T getInstance(String name, Class<T> type) {
-        AnnotationConfigApplicationContext context = getContext(name);
-        if (BeanFactoryUtils.beanNamesForTypeIncludingAncestors(context,
-                type).length > 0) {
-            return context.getBean(type);
-        }
-        return null;
-    }
-
-    //从命名空间中获取指定类型的Bean
-    public <T> Map<String, T> getInstances(String name, Class<T> type) {
-        AnnotationConfigApplicationContext context = getContext(name);
-        if (BeanFactoryUtils.beanNamesForTypeIncludingAncestors(context,
-                type).length > 0) {
-            return BeanFactoryUtils.beansOfTypeIncludingAncestors(context, type);
-        }
-        return null;
-    }
-
-}
-```
-
-
-
-关键的方法是createContext，为@FeignClient的name独立创建ApplicationContext，设置parent为外部传入的Context，这样就可以共用外部的Context中的Bean，又有各种独立的配置Bean
-
-从FeignContext中获取Bean，需要传入@FeignClient的name，根据name找到缓存中的ApplicationContext，先从自己注册的Bean中获取bean，没有获取到再从到parent中获取。
 
 
 
@@ -945,7 +912,7 @@ final class SynchronousMethodHandler implements MethodHandler {
 
   @Override
   public Object invoke(Object[] argv) throws Throwable {
-    //RequestTemplate @FeignClient 上请求相关参数的包装
+    //RequestTemplate 处理请求参数
     RequestTemplate template = buildTemplateFromArgs.create(argv);
     Retryer retryer = this.retryer.clone();
     while (true) {
@@ -1096,14 +1063,17 @@ public class LoadBalancerFeignClient implements Client {
 
 ####  回顾
 
-总到来说，Feign的源码实现的过程如下：
+简单总结下工作原理
 
-首先通过@EnableFeignCleints注解开启FeignCleint
-程序启动后，会进行包扫描，扫描所有的@ FeignCleint的注解的类，并将这些信息注入到ioc容器中。
-当接口的方法被调用，通过jdk的代理，来生成具体的RequesTemplate
-RequesTemplate在生成Request
-Request交给Client去处理，其中Client可以是HttpUrlConnection、HttpClient也可以是Okhttp
-最后Client被封装到LoadBalanceClient类，这个类结合类Ribbon做到了负载均衡。
+1.在初始化过程中@FeignClient接口以FeignClientFactoryBean类型注册容器中
+
+2.FeignClientFactoryBean.getObject() 方法创建feignclient的jdk代理动态代理对象,其中会为接口中的每个方法创建一个MethodHandler对象
+
+3.当接口的方法被调用,调用对应的MethodHandler对象的invoke()方法
+
+4.MethodHandler对象的invoke() 处理请求参数,使用client 进行网络请求,处理http响应信息,并返回结果
+
+
 
 
 
