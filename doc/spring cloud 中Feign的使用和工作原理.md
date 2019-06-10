@@ -23,7 +23,7 @@ Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操�
 
 1.简单介绍feign的使用
 
-2.可配置信息的介绍
+2.介绍一些配置信息的
 
 ## demo
 
@@ -41,7 +41,6 @@ Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操�
 
         <dependency>
             <groupId>org.springframework.cloud</groupId>
-            <!-- 注意名称的改变 和F之前的版本所有区别 -->
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
         <dependency>
@@ -151,6 +150,8 @@ public interface ApiFeignClient {
 
 在启动类上开启的@EnableFeignClients 注解
 
+
+
 ```java
 
  /**
@@ -178,6 +179,8 @@ public interface ApiFeignClient {
 
 
 
+确定要扫描的包(类),默认为使用了注解的类所在包
+
 
 
 ## @FeignClient 注解属性
@@ -185,7 +188,7 @@ public interface ApiFeignClient {
 ```java
 
  /**
- *value和name用于定义http客户端服务的名称 ,如果要在spring cloud为配合Rinbon做服务间调用负载均衡的话。这里的name=注册在enurke上的application.name
+ *value和name用于定义http客户端服务的名称,spring beanDefinition的name  如果要在spring cloud为配合Rinbon做服务间调用负载均衡的话。这里的name=注册在enurke上的application.name
  **/
  @AliasFor("name")
  String value() default "";
@@ -249,12 +252,95 @@ fallback 和 fallbackFactory 两者主要差别在于 fallbackFactory 可以获�
 
 本块内容包含
 
-
 spring cloud feign 初始化流程涉及的配置介绍
 
-#### 1.FeignAutoConfiguration
 
-在这个类中主要配置Feign上下文（FeignContext）、配置Targeter、配置Client(仅仅组件)
+
+#### 1.FeignClientsConfiguration
+
+加载Decoder、Encoder、Retryer、Contract（SpringMvcContract）、FeignBuilder等组件
+
+其中Decoder 和 Encoder 默认使用的是spring的方式 默认通过HttpMessageConverters进行处理
+
+```java
+@Configuration
+public class FeignClientsConfiguration {
+
+    @Autowired
+    private ObjectFactory<HttpMessageConverters> messageConverters;
+
+   //...代码省略
+
+    @Bean
+    @ConditionalOnMissingBean
+    public Decoder feignDecoder() {
+        return new OptionalDecoder(new ResponseEntityDecoder(new               SpringDecoder(this.messageConverters)));
+    }
+    //容器默认注入了SpringEncoder作为系统的编码器，使用Spring MVC的 messageConverters。
+    @Bean
+    @ConditionalOnMissingBean
+    public Encoder feignEncoder() {
+        return new SpringEncoder(this.messageConverters);
+    }
+    //注入了SpringMvcContract这个类作为对Spring MVC的注解解析
+    @Bean
+    @ConditionalOnMissingBean
+    public Contract feignContract(ConversionService feignConversionService) {
+        return new SpringMvcContract(this.parameterProcessors, feignConversionService);
+    }
+
+    @Bean
+    public FormattingConversionService feignConversionService() {
+        FormattingConversionService conversionService = new DefaultFormattingConversionService();
+        for (FeignFormatterRegistrar feignFormatterRegistrar : feignFormatterRegistrars) {
+            feignFormatterRegistrar.registerFormatters(conversionService);
+        }
+        return conversionService;
+    }
+
+    @Configuration
+    @ConditionalOnClass({ HystrixCommand.class, HystrixFeign.class })
+    protected static class HystrixFeignConfiguration {
+        @Bean
+        @Scope("prototype")
+        @ConditionalOnMissingBean
+        @ConditionalOnProperty(name = "feign.hystrix.enabled")
+        public Feign.Builder feignHystrixBuilder() {
+            return HystrixFeign.builder();
+        }
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public Retryer feignRetryer() {
+        return Retryer.NEVER_RETRY;
+    }
+	
+    //feign代理对象的构建类,包含构建代理对象的所有属性
+    @Bean
+    @Scope("prototype")
+    @ConditionalOnMissingBean
+    public Feign.Builder feignBuilder(Retryer retryer) {
+        return Feign.builder().retryer(retryer);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean(FeignLoggerFactory.class)
+    public FeignLoggerFactory feignLoggerFactory() {
+        return new DefaultFeignLoggerFactory(logger);
+    }
+
+}
+
+```
+
+
+
+
+
+#### 2.FeignAutoConfiguration
+
+在这个自动装配类中主要配置Feign上下文（FeignContext）、配置Targeter、配置Client(仅仅组件)
 
 ```java
 @Configuration
@@ -446,84 +532,6 @@ public abstract class NamedContextFactory<C extends NamedContextFactory.Specific
 
 
 
-#### 2.FeignClientsConfiguration
-
-加载Decoder、Encoder、Retryer、Contract（SpringMvcContract）、FeignBuilder等组件
-
-其中Decoder 和 Encoder 默认使用的是spring的方式 默认通过HttpMessageConverters进行处理
-
-```java
-@Configuration
-public class FeignClientsConfiguration {
-
-    @Autowired
-    private ObjectFactory<HttpMessageConverters> messageConverters;
-
-   //...代码省略
-
-    @Bean
-    @ConditionalOnMissingBean
-    public Decoder feignDecoder() {
-        return new OptionalDecoder(new ResponseEntityDecoder(new               SpringDecoder(this.messageConverters)));
-    }
-    //容器默认注入了SpringEncoder作为系统的编码器，底层还是用的Spring MVC的 messageConverters。
-    @Bean
-    @ConditionalOnMissingBean
-    public Encoder feignEncoder() {
-        return new SpringEncoder(this.messageConverters);
-    }
-    //注入了SpringMvcContract这个类作为对Spring MVC的注解解析
-    @Bean
-    @ConditionalOnMissingBean
-    public Contract feignContract(ConversionService feignConversionService) {
-        return new SpringMvcContract(this.parameterProcessors, feignConversionService);
-    }
-
-    @Bean
-    public FormattingConversionService feignConversionService() {
-        FormattingConversionService conversionService = new DefaultFormattingConversionService();
-        for (FeignFormatterRegistrar feignFormatterRegistrar : feignFormatterRegistrars) {
-            feignFormatterRegistrar.registerFormatters(conversionService);
-        }
-        return conversionService;
-    }
-
-    @Configuration
-    @ConditionalOnClass({ HystrixCommand.class, HystrixFeign.class })
-    protected static class HystrixFeignConfiguration {
-        @Bean
-        @Scope("prototype")
-        @ConditionalOnMissingBean
-        @ConditionalOnProperty(name = "feign.hystrix.enabled")
-        public Feign.Builder feignHystrixBuilder() {
-            return HystrixFeign.builder();
-        }
-    }
-
-    @Bean
-    @ConditionalOnMissingBean
-    public Retryer feignRetryer() {
-        return Retryer.NEVER_RETRY;
-    }
-	
-    //feign代理对象的构建类,包含构建代理对象的所有属性
-    @Bean
-    @Scope("prototype")
-    @ConditionalOnMissingBean
-    public Feign.Builder feignBuilder(Retryer retryer) {
-        return Feign.builder().retryer(retryer);
-    }
-
-    @Bean
-    @ConditionalOnMissingBean(FeignLoggerFactory.class)
-    public FeignLoggerFactory feignLoggerFactory() {
-        return new DefaultFeignLoggerFactory(logger);
-    }
-
-}
-
-```
-
 
 
 #### 3.@EnableFeignClients
@@ -577,10 +585,12 @@ public void registerFeignClients(AnnotationMetadata metadata,
   //查看@EnableFeignClients中设置的clients参数
   final Class<?>[] clients = attrs == null ? null
     : (Class<?>[]) attrs.get("clients");
+  //设置过滤器和设置要扫描的包
   //如果没有设置clients参数，那么设置要扫描的包是@EnableFeignClients中设置的value值
   if (clients == null || clients.length == 0) {
-   scanner.addIncludeFilter(annotationTypeFilter);
-   basePackages = getBasePackages(metadata);
+      //设置过滤器
+     scanner.addIncludeFilter(annotationTypeFilter);
+     basePackages = getBasePackages(metadata);
   }
   else {
    final Set<String> clientClasses = new HashSet<>();
@@ -620,6 +630,8 @@ public void registerFeignClients(AnnotationMetadata metadata,
      //将@FeignClient注解中Configuration属性注册进容器中，其中名字是name的值
      registerClientConfiguration(registry, name,
        attributes.get("configuration"));
+        
+     //往ioc容器中注册
      //下面有讲解
      registerFeignClient(registry, annotationMetadata, attributes);
     }
@@ -676,7 +688,7 @@ private void registerFeignClient(BeanDefinitionRegistry registry,
 
 大概总结一下FeignClient的注册流程
 
-1. 扫描`@EnableFeignClients`注解中basePackage值下的所有带有`@FeignClient`的接口
+1. 扫描`@EnableFeignClients`注解中,确定要扫描的basePackage,扫描包中所有使用了`@FeignClient`的接口
 2. 读取接口上面的 `@FeignClient` 注解参数
 3. 如果此接口上有Configuration参数，那么先进行注册此参数，注意此参数注册在Spring容器中是以`FeignClientSpecification`类型注册的
 4. 注册完Configuration参数以后，然后将其余的信息注册到容器中，注意这时是以`FeignClientFactoryBean `类型注册的，另外此时的Configuration参数并没有传过来。
@@ -1000,9 +1012,7 @@ final class SynchronousMethodHandler implements MethodHandler {
   }
 ```
 
-RequestTemplate
 
-![RequestTemplate.png](https://s2.ax1x.com/2019/05/31/VlcisH.png)
 
 
 
@@ -1065,15 +1075,13 @@ public class LoadBalancerFeignClient implements Client {
 
 简单总结下工作原理
 
-1.在初始化过程中@FeignClient接口以FeignClientFactoryBean类型注册容器中
+1.在初始化过程中@FeignClient接口以FeignClientFactoryBean类型注册IOC容器中
 
-2.FeignClientFactoryBean.getObject() 方法创建feignclient的jdk代理动态代理对象,其中会为接口中的每个方法创建一个MethodHandler对象
+2.FeignClientFactoryBean.getObject() 方法创建FeignClient的jdk代理动态代理对象,其中会为接口中的每个方法创建一个MethodHandler对象
 
 3.当接口的方法被调用,调用对应的MethodHandler对象的invoke()方法
 
-4.MethodHandler对象的invoke() 处理请求参数,使用client 进行网络请求,处理http响应信息,并返回结果
-
-
+4.MethodHandler对象的invoke()方法会 处理请求参数,使用client 进行网络请求,处理http响应信息,并返回结果
 
 
 
