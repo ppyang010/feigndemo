@@ -40,13 +40,13 @@
         <dependency>
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-openfeign</artifactId>
-            <exclusions>
-                <!-- 防止FeignAutoConfiguration 创建HystrixTargeter  -->
-                <exclusion>
-                    <artifactId>feign-hystrix</artifactId>
-                    <groupId>io.github.openfeign</groupId>
-                </exclusion>
-            </exclusions>
+            <!--<exclusions>-->
+                <!--&lt;!&ndash; 防止FeignAutoConfiguration 创建HystrixTargeter  &ndash;&gt;-->
+                <!--<exclusion>-->
+                    <!--<artifactId>feign-hystrix</artifactId>-->
+                    <!--<groupId>io.github.openfeign</groupId>-->
+                <!--</exclusion>-->
+            <!--</exclusions>-->
         </dependency>
 
 

@@ -1016,34 +1016,7 @@ final class SynchronousMethodHandler implements MethodHandler {
 
 
 
-LoadBalancerFeignClient
 
-```java
-public class LoadBalancerFeignClient implements Client {
-。。。
-    @Override
-    public Response execute(Request request, Request.Options options) throws IOException {
-        try {
-            //获取URI
-            URI asUri = URI.create(request.url());
-            //获取客户端的名称
-            String clientName = asUri.getHost();
-            URI uriWithoutHost = cleanUrl(request.url(), clientName);
-            //创建RibbonRequest
-            FeignLoadBalancer.RibbonRequest ribbonRequest = new FeignLoadBalancer.RibbonRequest(
-                    this.delegate, request, uriWithoutHost);
-            //包装请求配置
-            IClientConfig requestConfig = getClientConfig(options, clientName);
-            //获取FeignLoadBalancer，替换请求中的客户端名称为实际ip, 发送网络请求，转换Response
-            return lbClient(clientName).executeWithLoadBalancer(ribbonRequest,
-                    requestConfig).toResponse();
-        } catch (ClientException e) {
-            。。。
-        }
-    }
-```
-
-代码逻辑也比较简单，就是是配到Ribbon客户端上调用。Ribbon的相关使用和原理就不在本文中描述。
 
 默认的client
 
@@ -1085,13 +1058,135 @@ public class LoadBalancerFeignClient implements Client {
 
 
 
+![1](https://image-static.segmentfault.com/377/707/3777075039-5b042bdb65b51)
 
 
 
+以上就是不整合Hytrix和RIbbon的feign的基本原理,下面简单介绍下Hytrix和RIbbon的整合
 
 
 
+### Hytrix和RIbbon整合
 
 
 
+#### hystrix整合
 
+在spring could 中feign也整合了Hystrix，实现熔断降级的功能，在上面的分析中我们知道了feign在方法调用的时候会经过统一方法拦截器FeignInvocationHandler的处理，而HystrixFeign则是使用了HystrixInvocationHandler代替
+
+
+
+```java
+final class HystrixInvocationHandler implements InvocationHandler {
+	private final Target<?> target;
+  private final Map<Method, MethodHandler> dispatch;
+  private final FallbackFactory<?> fallbackFactory; // Nullable
+  private final Map<Method, Method> fallbackMethodMap;
+  private final Map<Method, Setter> setterMethodMap;
+  
+  //其他代码省略...
+  
+   @Override
+  public Object invoke(final Object proxy, final Method method, final Object[] args)
+      throws Throwable {
+  	//省略 equals hashCode 等方法的处理...
+		
+    //hystrix 命令
+    HystrixCommand<Object> hystrixCommand = new HystrixCommand<Object>(setterMethodMap.get(method)) {
+      @Override
+      protected Object run() throws Exception {
+        try {
+          return HystrixInvocationHandler.this.dispatch.get(method).invoke(args);
+        } catch (Exception e) {
+          throw e;
+        } catch (Throwable t) {
+          throw (Error) t;
+        }
+      }
+
+      @Override
+      protected Object getFallback() {
+        if (fallbackFactory == null) {
+          return super.getFallback();
+        }
+        try {
+          Object fallback = fallbackFactory.create(getExecutionException());
+          Object result = fallbackMethodMap.get(method).invoke(fallback, args);
+          if (isReturnsHystrixCommand(method)) {
+            return ((HystrixCommand) result).execute();
+          } else if (isReturnsObservable(method)) {
+            // Create a cold Observable
+            return ((Observable) result).toBlocking().first();
+          } else if (isReturnsSingle(method)) {
+            // Create a cold Observable as a Single
+            return ((Single) result).toObservable().toBlocking().first();
+          } else if (isReturnsCompletable(method)) {
+            ((Completable) result).await();
+            return null;
+          } else {
+            return result;
+          }
+        } catch (IllegalAccessException e) {
+          // shouldn't happen as method is public due to being an interface
+          throw new AssertionError(e);
+        } catch (InvocationTargetException e) {
+          // Exceptions on fallback are tossed by Hystrix
+          throw new AssertionError(e.getCause());
+        }
+      }
+    };
+
+    if (Util.isDefault(method)) {
+      return hystrixCommand.execute();
+    } else if (isReturnsHystrixCommand(method)) {
+      return hystrixCommand;
+    } else if (isReturnsObservable(method)) {
+      // Create a cold Observable
+      return hystrixCommand.toObservable();
+    } else if (isReturnsSingle(method)) {
+      // Create a cold Observable as a Single
+      return hystrixCommand.toObservable().toSingle();
+    } else if (isReturnsCompletable(method)) {
+      return hystrixCommand.toObservable().toCompletable();
+    }
+    return hystrixCommand.execute();
+  }
+  
+   //其他代码省略...
+}
+```
+
+
+
+hystrix相关使用和原理就不在这里描述了。
+
+#### Robbin整合
+
+LoadBalancerFeignClient
+
+```java
+public class LoadBalancerFeignClient implements Client {
+。。。
+    @Override
+    public Response execute(Request request, Request.Options options) throws IOException {
+        try {
+            //获取URI
+            URI asUri = URI.create(request.url());
+            //获取客户端的名称
+            String clientName = asUri.getHost();
+            URI uriWithoutHost = cleanUrl(request.url(), clientName);
+            //创建RibbonRequest
+            FeignLoadBalancer.RibbonRequest ribbonRequest = new FeignLoadBalancer.RibbonRequest(
+                    this.delegate, request, uriWithoutHost);
+            //包装请求配置
+            IClientConfig requestConfig = getClientConfig(options, clientName);
+            //获取FeignLoadBalancer，替换请求中的客户端名称为实际ip, 发送网络请求，转换Response
+            return lbClient(clientName).executeWithLoadBalancer(ribbonRequest,
+                    requestConfig).toResponse();
+        } catch (ClientException e) {
+            。。。
+        }
+    }
+```
+
+代码逻辑也比较简单，就是是配到Ribbon客户端上调用。Ribbon的相关使用和原理就不在这里描述了。
