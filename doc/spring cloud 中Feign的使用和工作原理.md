@@ -7,7 +7,7 @@
 
 
 
-# spring cloud 中Feign的使用和工作原理
+# spring cloud 中Feign的使用和工作原理分析
 
 
 
@@ -25,9 +25,9 @@ Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操�
 
 2.介绍一些配置信息的
 
-## demo
+## 使用
 
-依赖
+pom依赖
 
 ```xml
 <dependency>
@@ -43,17 +43,6 @@ Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操�
             <groupId>org.springframework.cloud</groupId>
             <artifactId>spring-cloud-starter-netflix-eureka-client</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-test</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-
-        <dependency>
-            <groupId>org.springframework.cloud</groupId>
-            <artifactId>spring-cloud-starter-feign</artifactId>
-        </dependency>
 
         <dependency>
             <groupId>org.springframework.cloud</groupId>
@@ -62,26 +51,9 @@ Feign是一款客户端HTTP调用组件，用于简化目前Rest接口调用操�
 
 ```
 
-配置文件 application.yml
-
-```java
-spring:
-  profiles: dev0
-  application:
-    name: eureka-feign
-server:
-  port: 7200
-eureka:
-  client:
-    serviceUrl:
-      defaultZone: http://127.0.0.1:7700/eureka
-```
 
 
-
-
-
-EnableFeignClients
+@EnableFeignClients注解启用feign
 
 ```java
 @SpringBootApplication
@@ -94,7 +66,7 @@ public class SpringDemoApplication {
 }
 ```
 
-客户端
+@FeignClient注解配置http客户端
 
 绝对地址
 
@@ -133,11 +105,28 @@ public interface ApiFeignClient {
 
 ```
 
+配置文件 application.yml
+
+```java
+spring:
+  profiles: dev0
+  application:
+    name: eureka-feign
+server:
+  port: 7200
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://127.0.0.1:7700/eureka
+```
+
+
+
 
 
 使用
 
-可以直接在其他springbean中注入使用
+注入到其他的类中,调用方法,即可发送http请求
 
 ```java
     @Autowired
@@ -188,7 +177,7 @@ public interface ApiFeignClient {
 ```java
 
  /**
- *value和name用于定义http客户端服务的名称,spring beanDefinition的name  如果要在spring cloud为配合Rinbon做服务间调用负载均衡的话。这里的name=注册在enurke上的application.name
+ *value和name用于定义http客户端服务的名称,spring beanDefinition的name  如果要在spring cloud为配合Rinbon做服务间调用负载均衡的话。这里的name=注册在eurke上的目标服务application.name
  **/
  @AliasFor("name")
  String value() default "";
@@ -250,9 +239,9 @@ fallback 和 fallbackFactory 两者主要差别在于 fallbackFactory 可以获�
 
 ### 初始化流程
 
-本块内容包含
 
-spring cloud feign 初始化流程涉及的配置介绍
+
+spring cloud feign 在启动的时候会加载几个配置类
 
 
 
@@ -260,7 +249,7 @@ spring cloud feign 初始化流程涉及的配置介绍
 
 加载Decoder、Encoder、Retryer、Contract（SpringMvcContract）、FeignBuilder等组件
 
-其中Decoder 和 Encoder 默认使用的是spring的方式 默认通过HttpMessageConverters进行处理
+其中Decoder 和 Encoder 默认使用的是spring mvc的方式 默认通过HttpMessageConverters进行处理
 
 ```java
 @Configuration
@@ -340,7 +329,7 @@ public class FeignClientsConfiguration {
 
 #### 2.FeignAutoConfiguration
 
-在这个自动装配类中主要配置Feign上下文（FeignContext）、配置Targeter、配置Client(仅仅组件)
+在这个自动装配类中主要声明了Feign上下文（FeignContext）、Targeter、Client(仅仅组件)等组件
 
 ```java
 @Configuration
@@ -711,7 +700,7 @@ private void registerFeignClient(BeanDefinitionRegistry registry,
 
 接下来可以查看Feign代理Bean实例是如何创建的的，参见FeignClientFactoryBean源码：
 
-这里最核心的方法是getObject(),spring会调用这个类实例化bean
+作为一个实现了FactoryBean的工厂类，那么每次在Spring 实例化beansh会调用它的getObject()方法。
 
 ```java
 class FeignClientFactoryBean implements FactoryBean<Object>, InitializingBean,
@@ -755,7 +744,7 @@ class FeignClientFactoryBean implements FactoryBean<Object>, InitializingBean,
             this.url = "http://" + this.url;
         }
         String url = this.url + cleanPath();
-        //获取到调用客户端：Spring封装了基于Ribbon的客户端（LoadBalancerFeignClient）
+        //获取网络请求客户端：Spring封装了基于Ribbon的客户端（LoadBalancerFeignClient）
         //1、Feign自己封装的Request（基于java.net原生），2、OkHttpClient（新一代/HTTP2），3、ApacheHttpClient（常规）
         Client client = getOptional(context, Client.class);
         if (client != null) {
@@ -793,6 +782,12 @@ class DefaultTargeter implements Targeter {
  
     }
 }
+```
+
+
+
+```java
+
 
 //feign.Feign.Builder
 public static class Builder {
@@ -865,7 +860,7 @@ public class ReflectiveFeign extends Feign {
 
 
 
-我们都知道动态代理对象最后执行方法的时候都会调用到InvocationHandler.invoke()方法,而这里FeignInvocationHandler类的invoke中会根据method获取对应的`SynchronousMethodHandler`执行其 invoke 方法
+动态代理对象执行方法的时候都会调用到InvocationHandler.invoke()方法,而这里FeignInvocationHandler类的invoke中会根据method获取对应的`SynchronousMethodHandler`执行其 invoke 方法
 
 ```java
 static class FeignInvocationHandler implements InvocationHandler {
@@ -879,20 +874,9 @@ static class FeignInvocationHandler implements InvocationHandler {
 
     @Override
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-      if ("equals".equals(method.getName())) {
-        try {
-          Object
-              otherHandler =
-              args.length > 0 && args[0] != null ? Proxy.getInvocationHandler(args[0]) : null;
-          return equals(otherHandler);
-        } catch (IllegalArgumentException e) {
-          return false;
-        }
-      } else if ("hashCode".equals(method.getName())) {
-        return hashCode();
-      } else if ("toString".equals(method.getName())) {
-        return toString();
-      }
+     //省略 equals hashCode 等方法的处理...
+        
+      //根据method 委托对应的  MethodHandler 执行
       return dispatch.get(method).invoke(args);
     }
 
@@ -1050,9 +1034,9 @@ final class SynchronousMethodHandler implements MethodHandler {
 
 1.在初始化过程中@FeignClient接口以FeignClientFactoryBean类型注册IOC容器中
 
-2.FeignClientFactoryBean.getObject() 方法创建FeignClient的jdk代理动态代理对象,其中会为接口中的每个方法创建一个MethodHandler对象
+2.FeignClientFactoryBean.getObject() 方法创建FeignClient的jdk动态代理对象,其中会为接口中的每个方法创建一个MethodHandler对象
 
-3.当接口的方法被调用,调用对应的MethodHandler对象的invoke()方法
+3.当调用方法时,会调用mehod对应的MethodHandler对象的invoke()方法
 
 4.MethodHandler对象的invoke()方法会 处理请求参数,使用client 进行网络请求,处理http响应信息,并返回结果
 
@@ -1072,7 +1056,7 @@ final class SynchronousMethodHandler implements MethodHandler {
 
 #### hystrix整合
 
-在spring could 中feign也整合了Hystrix，实现熔断降级的功能，在上面的分析中我们知道了feign在方法调用的时候会经过统一方法拦截器FeignInvocationHandler的处理，而HystrixFeign则是使用了HystrixInvocationHandler代替
+在spring could 中feign也整合了Hystrix，实现熔断降级的功能，在上面的分析中我们知道了feign在方法调用的时候会经过统一方法拦截器FeignInvocationHandler的处理，而在启用hystrix功能后是使用HystrixInvocationHandler代替
 
 
 
@@ -1096,6 +1080,7 @@ final class HystrixInvocationHandler implements InvocationHandler {
       @Override
       protected Object run() throws Exception {
         try {
+            //方法执行放在了hystrix 命令中
           return HystrixInvocationHandler.this.dispatch.get(method).invoke(args);
         } catch (Exception e) {
           throw e;
@@ -1158,11 +1143,13 @@ final class HystrixInvocationHandler implements InvocationHandler {
 
 
 
-hystrix相关使用和原理就不在这里描述了。
+hystrix相关使用和原理就不在这里详细描述了。
 
 #### Robbin整合
 
-LoadBalancerFeignClient
+如果包含ribbon相关的包,FeignRibbonClientAutoConfiguration会自动装配LoadBalancer相关的client 
+
+如LoadBalancerFeignClient
 
 ```java
 public class LoadBalancerFeignClient implements Client {
@@ -1189,4 +1176,8 @@ public class LoadBalancerFeignClient implements Client {
     }
 ```
 
-代码逻辑也比较简单，就是是配到Ribbon客户端上调用。Ribbon的相关使用和原理就不在这里描述了。
+Ribbon的相关使用和原理就不在这里详细描述了。
+
+
+
+# 完
