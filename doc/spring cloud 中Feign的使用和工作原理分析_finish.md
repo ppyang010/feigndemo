@@ -235,15 +235,29 @@ fallback 和 fallbackFactory 两者主要差别在于 fallbackFactory 可以获�
 
 # 2.原理解析
 
+### feign核心类介绍
 
+- feign.Feign.Builder 设置发送http请求的相关参数，比如http客户端，重试策略，编解码，超时时间等等
+  - feign.Contract.Default 解析接口方法的元数据，构建http请求模板
+  - feign.Client 发送http请求客户端，默认实现feign.Client.Default，使用的是java.net包实现的
+  - Retryer 重试，默认实现feign.Retryer.Default，超时延迟100ms开始重试，每隔1s重试一次，重试4次.默认设置为etryer.NEVER_RETRY,不进行重试
+  - Options 超时时间，默认连接超时10s，读超时60s
+  - feign.codec.Encoder 编码器 默认使用的是spring mvc的方式 默认通过HttpMessageConverters进行处理
+  - feign.codec.Decoder 解码器 默认使用的是spring mvc的方式 默认通过HttpMessageConverters进行处理
+  - RequestInterceptor 请求拦截器，可以在发送http请求之前执行此拦截器
+  - feign.Contract 接口以及方法元数据解析器
+    以上参数都可以自己扩展
+- HardCodedTarget 定于目标接口和url
+- ReflectiveFeign 生成动态代理类，基于jdk的动态代理实现
+- feign.InvocationHandlerFactory.Default 接口方法统一拦截器创建工厂
+- FeignInvocationHandler 接口统一方法拦截器
+- ParseHandlersByName 解析接口方法元数据
+- SynchronousMethodHandler.Factory 接口方法的拦截器创建工厂
+- SynchronousMethodHandler 接口方法的拦截器，真正拦截的核心，这里真正发起http请求，处理返回结果
 
 ### 初始化流程
 
-
-
 spring cloud feign 在启动的时候会加载几个配置类
-
-
 
 #### 1.FeignClientsConfiguration
 
@@ -519,10 +533,6 @@ public abstract class NamedContextFactory<C extends NamedContextFactory.Specific
 
 
 
-
-
-
-
 #### 3.@EnableFeignClients
 
 Feign的使用是从`@EnableFeignClients`注解开始的，注解源码如下：
@@ -682,17 +692,80 @@ private void registerFeignClient(BeanDefinitionRegistry registry,
 3. 如果此接口上有Configuration参数，那么先进行注册此参数，注意此参数注册在Spring容器中是以`FeignClientSpecification`类型注册的
 4. 注册完Configuration参数以后，然后将其余的信息注册到容器中，注意这时是以`FeignClientFactoryBean `类型注册的，另外此时的Configuration参数并没有传过来。
 
+#### 类加载情况
 
+默认情况下所加载的类情况
+
+- feign.Feign.Builder 当引入了Hytrix并开启参数feign.hystrix.enabled=true后，则会加载feign.hystrix.HystrixFeign.Builder，此时feign就具备降级熔断的功能了。
+
+- feign.Client 此实现类的加载分两种情况：
+
+  - 使用url方式：feign.Client.Default，使用java原生的方式（java.net包）发起http请求，也可以自己扩展。
+  - 使用name方式：LoadBalancerFeignClient，集成了ribbon，实现服务发现与负载均衡，但是真正发起http请求还是java原生的方式
+    此处是一扩展点，当我们引入ApacheHttpClient时，http客户端就会使用apache的httpClient；当我们引入OkHttpClient时，http客户端就会使用okhttp3.OkHttpClient。
+
+- feign.Retryer 默认Retryer.NEVER_RETRY，不进行重试，这里也可以自己实现Retryer接口实现自己的重试策略，但是feign在集成了ribbon的情况下，最好保持默认不进行重试，因为ribbon也会有重试策略，如果feign也开启重试，容易产生混乱；其实在低版本中spring-cloud-feing重试默认并不是NEVER_RETRY，可能spring-cloud-feing也意识到这样做的问题，所以在D版中改成NEVER_RETRY了。
+
+- feign.Request.Options 默认设置连接超时时间是10，读超时时间是60s。这里也可以更改，分两种情况：
+
+  - 使用url方式：必须通过这个参数来设置，才生效
+
+    ```
+    @Configuration
+    public class MyConfig {
+        @Bean
+        public Request.Options options(){
+            Request.Options o = new Options(1000, 1000);
+            return o;
+        }
+    }
+    ```
+
+    然后在注解上@FeignClient指定：
+
+    ```
+    @FeignClient(name="",url="",configuration= {MyConfig.class})
+    ```
+
+    注意此类不能被spring容器扫描到，否则会对全局生效。你也可以通过注解@EnableFeignClients来全局指定：
+
+    ```
+    @EnableFeignClients(defaultConfiguration=MyConfig.class)
+    ```
+
+  - 使用name方式：此时已经集成了ribbon，可以使用以下配置来设置，如果你此时也配置了Options，以下配置会被覆盖
+
+    ```
+    # 对所有的feignclient生效
+    ribbon.ReadTimeout=10000
+    ribbon.ConnectTimeout=2000
+    
+    # 对指定的feignclien生效
+    [feignclientName].ribbon.ReadTimeout=10000
+    [feignclientName].ribbon.ConnectTimeout=2000
+    ```
+
+    如果开启Hytrix，hytrix也有超时时间设置，但是hytrix是封装在feign基础之上的，上文已有分析。
+
+    ```
+    hystrix.command.default.execution.isolation.thread.timeoutInMilliseconds=10000
+    ```
+
+    你也可以关闭hytrix的超时时间
+
+    ```
+    hystrix.command.default.execution.timeout.enabled=false
+    ```
+
+- feign.codec.Decoder 解码器，默认使用了HttpMessageConverters来实现
+
+- feign.codec.Encoder 编码器，默认使用了HttpMessageConverters来实现
+
+- feign.Contract 默认提供springmvc的注解解析，支持@RequestMapping，@RequestBody，@RequestParam，@PathVariable
 
 
 
 ### 方法执行流程
-
-这部分包含
-
-1.代理对像创建过程
-
-2.具体方法执行(代理对像执行方法)
 
 
 
@@ -1044,19 +1117,33 @@ final class SynchronousMethodHandler implements MethodHandler {
 
 ![1](https://image-static.segmentfault.com/377/707/3777075039-5b042bdb65b51)
 
+1、通过feign.Feign.Builder为我们设置http请求的相关参数，比如http客户端，重试策略，编解码，超时时间，这里都是面向接口编程实现的，我们很容易的进行扩展，比如http客户端，可以使用java原生的实现，也可以使用apache httpclient，亦可以使用okHttpClient，自己喜欢就好，其他属性亦是如此，由此看出feign的设计具有非常好的可扩展性。
+
+2、ReflectiveFeign内部使用了jdk的动态代理为目标接口生成了一个动态代理类，这里会生成一个InvocationHandler(jdk动态代理原理)统一的方法拦截器，同时为接口的每个方法生成一个SynchronousMethodHandler拦截器，并解析方法上的 元数据，生成一个http请求模板。
+
+3、当发起方法调用的时候，被统一的方法拦截器FeignInvocationHandler拦截，再根据不同的方法委托给不同的SynchronousMethodHandler拦截器处理。
+
+4、根据每次方法调用的入参生成http请求模板，如果设置了http请求拦截器，则先经历拦截器的处理，再发起真正的http请求，得到结果后会根据方法放入返回值进行反序列化，最后返回给调用方。
+
+5、如果发生了异常，会根据重试策略进行重试。
+
+
+
 
 
 以上就是不整合Hytrix和RIbbon的feign的基本原理,下面简单介绍下Hytrix和RIbbon的整合
 
 
 
-### Hytrix和RIbbon整合
+### Hytrix和Ribbon整合
 
 
 
 #### hystrix整合
 
-在spring could 中feign也整合了Hystrix，实现熔断降级的功能，在上面的分析中我们知道了feign在方法调用的时候会经过统一方法拦截器FeignInvocationHandler的处理，而在启用hystrix功能后是使用HystrixInvocationHandler代替
+
+
+在spring could 中feign也整合了Hystrix，实现熔断降级的功能，在上面的分析中我们知道了feign在方法调用的时候会经过统一方法拦截器FeignInvocationHandler的处理，当引入了Hytrix并开启参数feign.hystrix.enabled=true后，则会加载feign.hystrix.HystrixFeign.Builder，并使用HystrixInvocationHandler进行方法拦截
 
 
 
@@ -1141,11 +1228,14 @@ final class HystrixInvocationHandler implements InvocationHandler {
 }
 ```
 
+在方法调用的时候进行Hystrix的封装，这里需要特别说明下：
 
+- Hystrix有超时时间，feign本身也有超时时间，正常来说Hystrix的超时间要大于feign的超时时间，如果是小于的话，Hytrix已经超时了，feign再等待就已经没有意义了。
+- 再则就是feign超时的话会触发重试操作，此时要是Hytrix发生超时异常返回了，但这并不会切断feign的继续操作，什么意思呢？假设Hytrix的超时时间为1s，feign设置的超时时间为2s，而真正业务操作需要耗时3s，这时Hytrix超时异常返回，而后feign也会发生超时异常，但是feign会根据超时策略继续进行重试操作，并不会因为Hytrix的中断而中断。所以Hytrix的超时时间一般要大于feign的总超时时间，如这个例子中要设置2 *5(默认重试次数4 + 1)=10s，公式就是Hytrix的超时间=feign的超时 时间* (feign的重试次数 + 1)
 
 hystrix相关使用和原理就不在这里详细描述了。
 
-#### Robbin整合
+#### Ribbon整合
 
 如果包含ribbon相关的包,FeignRibbonClientAutoConfiguration会自动装配LoadBalancer相关的client 
 
@@ -1181,3 +1271,10 @@ Ribbon的相关使用和原理就不在这里详细描述了。
 
 
 # 完
+参考链接
+http://modouxiansheng.top/2018/11/09/不学无数-Feign源码解析-初始化流程-2018/
+https://juejin.im/post/5c38523051882524c84ebc1c
+http://techblog.ppdai.com/2018/05/28/20180528/
+https://www.jianshu.com/p/e561c8b5e150
+https://zhuanlan.zhihu.com/p/45495904
+https://segmentfault.com/a/1190000014981170 
