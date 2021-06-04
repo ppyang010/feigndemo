@@ -31,7 +31,7 @@
         <hutool.version>4.5.0</hutool.version>
         <mybatis-plus.version>3.0.6</mybatis-plus.version>
         <jackson.modules>2.9.6</jackson.modules>
-        <httpclient.version>4.5.8</httpclient.version>
+        <httpclient.version>4.5.13</httpclient.version>
         <okhttp.version>3.14.0</okhttp.version>
     </properties>
 
